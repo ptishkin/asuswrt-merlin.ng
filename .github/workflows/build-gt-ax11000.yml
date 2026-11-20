@@ -66,7 +66,12 @@ jobs:
             texinfo dos2unix xsltproc u-boot-tools device-tree-compiler \
             gperf uuid-dev libyaml-dev sharutils gengetopt \
             shtool autogen mtd-utils fakeroot rsync zip python3 \
-            libc6-i386 lib32stdc++6 lib32z1 libelf1 lib32ncurses6
+            libc6-i386 lib32stdc++6 lib32z1 libelf1 lib32ncurses6             uuid-dev zlib1g-dev
+        # pkg-config needs .pc files for zlib and uuid (checked by prebuild_checks)
+      - name: Verify pkg-config deps
+        run: |
+          pkg-config --exists zlib && echo "zlib OK" || { echo "zlib MISSING"; exit 1; }
+          pkg-config --exists uuid && echo "uuid OK" || { echo "uuid MISSING"; sudo apt-get install -y uuid-dev; }
 
       - name: Switch /bin/sh to bash (build requires bash)
         run: |
