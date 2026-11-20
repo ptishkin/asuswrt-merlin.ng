@@ -68,14 +68,12 @@ jobs:
             shtool autogen mtd-utils fakeroot rsync zip python3 \
             libc6-i386 lib32stdc++6 lib32z1 libelf1 lib32ncurses6
 
-      - name: Fix echo -e for dash (Ubuntu /bin/sh)
+      - name: Switch /bin/sh to bash (build requires bash)
         run: |
-          # Ubuntu runner uses dash as /bin/sh; 'echo -e' prints literal '-e'
-          # which corrupts generated Kconfig.autogen/Makefile.autogen files.
-          # Replace with printf (POSIX-portable).
-          cd release/src-rt-5.02axhnd
-          sed -i 's/echo -e "\\/printf "\\/g; s/echo -e /printf /g' make.hndrt
-          grep -n "printf" make.hndrt | head -5
+          # The build requires /bin/sh to be bash (make.common prebuild_checks),
+          # and dash breaks 'echo -e' in generated Kconfig/Makefile autogen files.
+          sudo ln -sf /bin/bash /bin/sh
+          ls -la /bin/sh
 
       - name: Build firmware
         env:
