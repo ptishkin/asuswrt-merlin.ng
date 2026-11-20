@@ -92,9 +92,10 @@ jobs:
 
           cd release/src-rt-5.02axhnd
           # Host gcc-14 treats incompatible-pointer-types as error; old hostTools
-          # (squashfs 4.0 mksquashfs.c signal handlers) predates that. Relax it.
-          sed -i 's/^CFLAGS := -I\$(INCLUDEDIR)/CFLAGS := -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -I$(INCLUDEDIR)/' hostTools/squashfs_4.0/Makefile
-          grep -n "^CFLAGS" hostTools/squashfs_4.0/Makefile | head -2
+          # (squashfs mksquashfs.c signal handlers) predates that. Relax it.
+          # The real mksquashfs is built from squashfs_4.2 (hostTools/Makefile:164).
+          sed -i 's/^CFLAGS ?= -O2/CFLAGS ?= -O2 -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration/' hostTools/squashfs_4.2/Makefile
+          grep -n "^CFLAGS" hostTools/squashfs_4.2/Makefile | head -2
           make "$MODEL" 2>&1 | tee build.log | tail -50
           test -d image || { echo "::error::Build failed - see build.log"; tail -100 build.log; exit 1; }
 
