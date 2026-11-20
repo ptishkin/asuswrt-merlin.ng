@@ -64,7 +64,7 @@ jobs:
             pkg-config zlib1g-dev libssl-dev liblzo2-dev liblzma-dev lzma \
             binutils-dev patch cmake intltool libglib2.0-dev gtk-doc-tools \
             texinfo dos2unix xsltproc u-boot-tools device-tree-compiler \
-            qemu-user-static gperf uuid-dev libyaml-dev sharutils gengetopt \
+            gperf uuid-dev libyaml-dev sharutils gengetopt \
             shtool autogen mtd-utils fakeroot rsync zip python3 \
             libc6-i386 lib32stdc++6 lib32z1 libelf1 lib32ncurses6
 
