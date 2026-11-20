@@ -96,7 +96,7 @@ jobs:
           # The real mksquashfs is built from squashfs_4.2 (hostTools/Makefile:164).
           # NOTE: hostTools/Makefile exports CFLAGS, so squashfs_4.2's 'CFLAGS ?='
           # is skipped - patch the unconditional 'CFLAGS +=' line instead.
-          sed -i 's/^CFLAGS += \$(EXTRA_CFLAGS)/CFLAGS += -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration $(EXTRA_CFLAGS)/' hostTools/squashfs_4.2/Makefile
+          sed -i 's/^CFLAGS += \$(EXTRA_CFLAGS)/CFLAGS += -std=gnu89 -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration $(EXTRA_CFLAGS)/' hostTools/squashfs_4.2/Makefile
           grep -n "^CFLAGS" hostTools/squashfs_4.2/Makefile | head -3
           make "$MODEL" 2>&1 | tee build.log | tail -50
           test -d image || { echo "::error::Build failed - see build.log"; tail -100 build.log; exit 1; }
