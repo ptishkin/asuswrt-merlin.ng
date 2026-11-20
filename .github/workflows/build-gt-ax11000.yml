@@ -87,6 +87,8 @@ jobs:
           export LD_LIBRARY_PATH=/opt/toolchains/${TC_ARM}/usr/lib
           export TOOLCHAIN_BASE=/opt/toolchains
           export PATH=/opt/toolchains/${TC_ARM}/usr/bin:/opt/toolchains/${TC_AARCH64}/usr/bin:$PATH
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          pkg-config --exists zlib && echo "zlib visible to make env" || { echo "zlib STILL missing"; pkg-config --variable=pc_path pkg-config; exit 1; }
 
           cd release/src-rt-5.02axhnd
           make "$MODEL" 2>&1 | tee build.log | tail -50
