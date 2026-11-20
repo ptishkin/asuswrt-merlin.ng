@@ -13,117 +13,82 @@ on:
         required: false
         default: true
 
-env:
-  # Toolchain version for HND AX models (BCM4908, kernel 4.1)
-  TC_ARM: crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1
-  TC_AARCH64: crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1
-
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build ${{ inputs.model || 'gt-ax11000' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 350
 
+    # Gnuton's image: Ubuntu 20.04 + gcc-5.3 HND toolchain + all build deps,
+    # /bin/sh -> bash already set. Same image his own CI uses for src-rt-5.02axhnd.
+    container:
+      image: gnuton/asuswrt-merlin-toolchains-docker:latest
+      options: --user root
+      volumes:
+        - /mnt:/project   # /mnt is the bigger partition on GH runners
+      env:
+        MODEL: ${{ inputs.model || 'gt-ax11000' }}
+        BUILD_ROGUI: ${{ inputs.build_rogui && 'y' || 'n' }}
+
+    defaults:
+      run:
+        # Build system refuses to run as root; drop to the image's 'docker' user
+        shell: gosu docker bash --noprofile --norc -e -o pipefail {0}
+
     steps:
-      - name: Free disk space on runner
+      - name: Fix permissions (as root)
+        shell: bash --noprofile --norc -e -o pipefail {0}
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
-          sudo docker image prune -af || true
-          df -h /
+          mkdir -p /project/repo /project/artifacts
+          chown -R docker:docker /github/home /home/docker /project
 
-      - name: Checkout firmware source
-        uses: actions/checkout@v4
-        with:
-          ref: gt-ax11000-388.12_2-upnpfix
-          fetch-depth: 1
-
-      - name: Checkout toolchains (Asuswrt-Merlin/am-toolchains)
-        uses: actions/checkout@v4
-        with:
-          repository: Asuswrt-Merlin/am-toolchains
-          ref: master
-          # sparse checkout: only the two crosstools needed for HND AX
-          sparse-checkout: |
-            brcm-arm-hnd/${{ env.TC_ARM }}
-            brcm-arm-hnd/${{ env.TC_AARCH64 }}
-          path: am-toolchains
-
-      - name: Install toolchain
+      - name: Show toolchain env (as docker user)
         run: |
-          sudo mkdir -p /opt/toolchains
-          sudo cp -a am-toolchains/brcm-arm-hnd/. /opt/toolchains/
-          ls /opt/toolchains/
-          # sanity check
-          /opt/toolchains/${TC_ARM}/bin/arm-buildroot-linux-gnueabi-gcc --version || true
+          source /home/docker/envs/bcm-hnd.sh
+          echo "TOOLCHAIN_BASE=$TOOLCHAIN_BASE"
+          ls /opt/toolchains/ | head
+          /opt/toolchains/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25/usr/bin/arm-buildroot-linux-gnueabi-gcc --version | head -1
 
-      - name: Install build dependencies
+      - name: Fetch firmware source (branch with UPnP fix)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential libncurses5-dev libncursesw5-dev \
-            gawk flex bison gettext libtool-bin automake autoconf autopoint \
-            pkg-config zlib1g-dev libssl-dev liblzo2-dev liblzma-dev lzma \
-            binutils-dev patch cmake intltool libglib2.0-dev gtk-doc-tools \
-            texinfo dos2unix xsltproc u-boot-tools device-tree-compiler \
-            gperf uuid-dev libyaml-dev sharutils gengetopt \
-            shtool autogen mtd-utils fakeroot rsync zip python3 \
-            libc6-i386 lib32stdc++6 lib32z1 libelf1 lib32ncurses6             uuid-dev zlib1g-dev
-        # pkg-config needs .pc files for zlib and uuid (checked by prebuild_checks)
-      - name: Verify pkg-config deps
-        run: |
-          pkg-config --exists zlib && echo "zlib OK" || { echo "zlib MISSING"; exit 1; }
-          pkg-config --exists uuid && echo "uuid OK" || { echo "uuid MISSING"; sudo apt-get install -y uuid-dev; }
-
-      - name: Switch /bin/sh to bash (build requires bash)
-        run: |
-          # The build requires /bin/sh to be bash (make.common prebuild_checks),
-          # and dash breaks 'echo -e' in generated Kconfig/Makefile autogen files.
-          sudo ln -sf /bin/bash /bin/sh
-          ls -la /bin/sh
+          cd /project
+          rm -rf repo
+          git clone --depth 1 --branch gt-ax11000-388.12_2-upnpfix \
+            "https://github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git log --oneline -3
+          # sanity: UPnP fix present?
+          grep -q "INVALID (must be between 1 and 5 incl.)" \
+            release/src/router/miniupnpd/minissdp.c \
+            && echo "UPnP CVE-2026-107159 fix: PRESENT" \
+            || { echo "::error::UPnP fix missing!"; exit 1; }
 
       - name: Build firmware
-        env:
-          MODEL: ${{ inputs.model || 'gt-ax11000' }}
         run: |
-          export LD_LIBRARY_PATH=/opt/toolchains/${TC_ARM}/usr/lib
-          export TOOLCHAIN_BASE=/opt/toolchains
-          export PATH=/opt/toolchains/${TC_ARM}/usr/bin:/opt/toolchains/${TC_AARCH64}/usr/bin:$PATH
-          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          pkg-config --exists zlib && echo "zlib visible to make env" || { echo "zlib STILL missing"; pkg-config --variable=pc_path pkg-config; exit 1; }
-
-          cd release/src-rt-5.02axhnd
-          # Host gcc-14 treats incompatible-pointer-types as error; old hostTools
-          # (squashfs mksquashfs.c signal handlers) predates that. Relax it.
-          # The real mksquashfs is built from squashfs_4.2 (hostTools/Makefile:164).
-          # NOTE: hostTools/Makefile exports CFLAGS, so squashfs_4.2's 'CFLAGS ?='
-          # is skipped - patch the unconditional 'CFLAGS +=' line instead.
-          sed -i 's/^CFLAGS += \$(EXTRA_CFLAGS)/CFLAGS += -std=gnu89 -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration $(EXTRA_CFLAGS)/' hostTools/squashfs_4.2/Makefile
-          grep -n "^CFLAGS" hostTools/squashfs_4.2/Makefile | head -3
-          make "$MODEL" 2>&1 | tee build.log | tail -50
-          test -d image || { echo "::error::Build failed - see build.log"; tail -100 build.log; exit 1; }
+          source /home/docker/envs/bcm-hnd.sh
+          cd /project/repo/release/src-rt-5.02axhnd
+          make "$MODEL" 2>&1 | tee build.log | tail -30
+          test -d image || { echo "::error::Build failed"; tail -100 build.log; exit 1; }
 
       - name: Build ROG UI image
         if: ${{ inputs.build_rogui }}
-        env:
-          MODEL: ${{ inputs.model || 'gt-ax11000' }}
         run: |
-          export LD_LIBRARY_PATH=/opt/toolchains/${TC_ARM}/usr/lib
-          export TOOLCHAIN_BASE=/opt/toolchains
-          export PATH=/opt/toolchains/${TC_ARM}/usr/bin:/opt/toolchains/${TC_AARCH64}/usr/bin:$PATH
-
-          cd release/src-rt-5.02axhnd
+          source /home/docker/envs/bcm-hnd.sh
+          cd /project/repo/release/src-rt-5.02axhnd
           sed -i 's/ROG_UI=n/ROG_UI=y/' target.mak || true
           rm -rf image/*.pkgtb image/*.w .config
-          make "$MODEL" 2>&1 | tee build-rogui.log | tail -30 || echo "::warning::ROG UI build failed"
+          make "$MODEL" 2>&1 | tee build-rogui.log | tail -30 \
+            || echo "::warning::ROG UI build failed"
 
       - name: Collect artifacts
         run: |
-          mkdir -p artifacts
-          cd release/src-rt-5.02axhnd/image 2>/dev/null || exit 0
-          # GT-AX11000 produces *_ubi.w images (cferom variant is discarded)
+          mkdir -p /project/artifacts
+          cd /project/repo/release/src-rt-5.02axhnd/image 2>/dev/null || exit 0
+          # GT-AX11000 produces *_ubi.w (cferom variant is discarded, as in build-all)
           rm -f *_cferom_ubi.w
-          cp -v *_ubi.w ../../../../artifacts/ 2>/dev/null || true
-          cp -v *.trx ../../../../artifacts/ 2>/dev/null || true
-          cd ../../../../artifacts
+          cp -v *_ubi.w /project/artifacts/ 2>/dev/null || true
+          cp -v *.trx /project/artifacts/ 2>/dev/null || true
+          cd /project/artifacts
           for f in *.w *.trx; do
             [ -f "$f" ] && sha256sum "$f" >> sha256sums.txt
           done
@@ -133,7 +98,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gt-ax11000-firmware
-          path: artifacts/
+          path: /project/artifacts/
           if-no-files-found: error
 
       - name: Upload build log on failure
@@ -142,6 +107,6 @@ jobs:
         with:
           name: build-log
           path: |
-            release/src-rt-5.02axhnd/build.log
-            release/src-rt-5.02axhnd/build-rogui.log
+            /project/repo/release/src-rt-5.02axhnd/build.log
+            /project/repo/release/src-rt-5.02axhnd/build-rogui.log
           if-no-files-found: ignore
