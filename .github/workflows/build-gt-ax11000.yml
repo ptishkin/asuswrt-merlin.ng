@@ -33,6 +33,7 @@ jobs:
       - name: Checkout firmware source
         uses: actions/checkout@v4
         with:
+          ref: gt-ax11000-388.12_2-upnpfix
           fetch-depth: 1
 
       - name: Checkout toolchains (Asuswrt-Merlin/am-toolchains)
