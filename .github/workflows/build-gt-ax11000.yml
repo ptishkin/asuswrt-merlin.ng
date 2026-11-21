@@ -80,18 +80,31 @@ jobs:
           make "$MODEL" 2>&1 | tee build-rogui.log | tail -30 \
             || echo "::warning::ROG UI build failed"
 
-      - name: Collect artifacts
+      - name: Collect artifacts (default UI)
         run: |
+          # Save the default-UI image BEFORE the ROG rebuild wipes image/
           mkdir -p /project/artifacts
           cd /project/repo/release/src-rt-5.02axhnd/image 2>/dev/null || exit 0
-          # GT-AX11000 produces *_ubi.w (cferom variant is discarded, as in build-all)
           rm -f *_cferom_ubi.w
           cp -v *_ubi.w /project/artifacts/ 2>/dev/null || true
           cp -v *.trx /project/artifacts/ 2>/dev/null || true
+          ls -la /project/artifacts/
+
+      - name: Collect artifacts (ROG UI)
+        if: ${{ inputs.build_rogui }}
+        run: |
+          cd /project/repo/release/src-rt-5.02axhnd/image 2>/dev/null || exit 0
+          rm -f *_cferom_ubi.w
+          cp -v *_ubi.w /project/artifacts/ 2>/dev/null || true
+          cp -v *.trx /project/artifacts/ 2>/dev/null || true
+
+      - name: Generate checksums
+        run: |
           cd /project/artifacts
           for f in *.w *.trx; do
             [ -f "$f" ] && sha256sum "$f" >> sha256sums.txt
           done
+          cat sha256sums.txt
           ls -la
 
       - name: Upload firmware
